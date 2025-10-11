@@ -86,5 +86,8 @@ def get_token():
 # =============================
 # Run server
 # =============================
+import os
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 8000))  # Railway sẽ tự set PORT
+    app.run(host="0.0.0.0", port=port)
