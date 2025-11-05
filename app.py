@@ -1,8 +1,11 @@
 from flask import Flask, jsonify, request
 import requests
 import time
+from flask_cors import CORS
+
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # =============================
 # Cấu hình cơ bản
