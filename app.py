@@ -1,111 +1,188 @@
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 import requests
 import time
+import json
 import os
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# =============================
-# Cấu hình cơ bản
-# =============================
+# ==============================
+# 🔐 CẤU HÌNH
+# ==============================
 APP_ID = "539235329188410"
 APP_SECRET = "87ac73c3ab4666955d2ca00b9900b051"
-LONG_LIVED_USER_TOKEN = "EAAHqboIZCIjoBP6uMGtxqZCZAJMZBbRmMXg5umw5ZAanJrlj8bBYnZCF1ZBb6ZBcpU9oRBaVTk15RmmEUtTZAD9nnGaf8t3PcawnZByAkpjZCLwAfW9X848wiCX5kOQZAe8LtZBW6UpQ9j3r3hFKGbqnuZAZCnUbtPeqDMH6CxRgUwW33Qb3UaTjL9VwbouxZCJpUWhtSm6RfwZDZD"
 
+# File lưu System User Token
+TOKEN_FILE = "fb_system_user_token.txt"
+
+# Cache page tokens trong RAM
 PAGE_TOKENS = {}
-TOKEN_EXPIRE = int(time.time()) + 60 * 60 * 24 * 50  # giả định 50 ngày
+PAGE_TOKENS_FETCHED_AT = 0
+PAGE_TOKENS_TTL = 60 * 60  # 1 giờ cache
 
-# =============================
-# Hàm lấy Page Access Tokens
-# =============================
-def fetch_page_tokens():
-    global PAGE_TOKENS, TOKEN_EXPIRE
-    url = "https://graph.facebook.com/v18.0/me/accounts"
-    params = {"access_token": LONG_LIVED_USER_TOKEN}
-    res = requests.get(url, params=params).json()
+# ==============================
+# 🔐 HÀM ĐỌC / GHI TOKEN TỪ FILE
+# ==============================
+def load_system_user_token():
+  """
+  Đọc System User Token từ file.
+  Nếu không có file thì dùng tạm env / hard-code (tuỳ bạn).
+  """
+  global SYSTEM_USER_TOKEN
 
-    if "data" not in res:
-        raise Exception(f"Lỗi khi lấy page token: {res}")
+  if os.path.exists(TOKEN_FILE):
+    with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+      token = f.read().strip()
+      if token:
+        SYSTEM_USER_TOKEN = token
+        print("✅ Loaded System User Token from file.")
+        return
 
-    PAGE_TOKENS = {}
-    for page in res["data"]:
-        PAGE_TOKENS[page["id"]] = {
-            "pageId": page["id"],
-            "name": page["name"],
-            "access_token": page["access_token"]
-        }
+  # fallback: hard-code hoặc biến môi trường
+  SYSTEM_USER_TOKEN = os.getenv("FB_SYSTEM_USER_TOKEN", "").strip()
+  if SYSTEM_USER_TOKEN:
+    print("⚠️ Using System User Token from ENV (chưa ghi file).")
+  else:
+    print("❌ Chưa cấu hình System User Token! Hãy gọi /api/update-token để cập nhật.")
 
-    # Kiểm tra hạn dùng user token
-    debug_url = "https://graph.facebook.com/v18.0/debug_token"
-    app_token = f"{APP_ID}|{APP_SECRET}"
-    params = {"input_token": LONG_LIVED_USER_TOKEN, "access_token": app_token}
-    debug_res = requests.get(debug_url, params=params).json()
-    if "data" in debug_res:
-        TOKEN_EXPIRE = debug_res["data"].get("expires_at", TOKEN_EXPIRE)
 
-# =============================
-# API endpoint
-# =============================
+def save_system_user_token(token: str):
+  """
+  Ghi System User Token vào file.
+  """
+  global SYSTEM_USER_TOKEN
+  SYSTEM_USER_TOKEN = token.strip()
+  with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+    f.write(SYSTEM_USER_TOKEN)
+  print("💾 Saved System User Token to file.")
 
-@app.route("/get-token", methods=["GET"])
+
+# Gọi ngay khi server start
+load_system_user_token()
+
+
+# ==============================
+# 🔄 HÀM LẤY PAGE TOKENS TỪ FACEBOOK
+# ==============================
+def fetch_page_tokens(force=False):
+  """
+  Lấy danh sách page (pageId + pageAccessToken) từ System User Token.
+  Có cache 1 giờ; nếu force=True thì luôn gọi lại.
+  """
+  global PAGE_TOKENS, PAGE_TOKENS_FETCHED_AT, SYSTEM_USER_TOKEN
+
+  # Kiểm tra đã có token chưa
+  if not SYSTEM_USER_TOKEN:
+    raise Exception("System User Token chưa được cấu hình. Hãy gọi /api/update-token.")
+
+  now = time.time()
+  # Dùng cache nếu còn hạn và không force
+  if not force and PAGE_TOKENS and (now - PAGE_TOKENS_FETCHED_AT) < PAGE_TOKENS_TTL:
+    print("ℹ️ Using cached PAGE_TOKENS.")
+    return
+
+  print("📡 Fetching PAGE_TOKENS from Facebook...")
+  url = "https://graph.facebook.com/v18.0/me/accounts"
+  params = {"access_token": SYSTEM_USER_TOKEN}
+  res = requests.get(url, params=params)
+  data = res.json()
+
+  if "error" in data:
+    print("❌ Error from Facebook:", data["error"])
+    raise Exception(f"Lỗi khi lấy page token: {data['error']}")
+
+  if "data" not in data:
+    raise Exception(f"Lỗi bất thường khi lấy page token: {data}")
+
+  # Map pageId -> info
+  PAGE_TOKENS = {
+    p["id"]: {
+      "pageId": p["id"],
+      "name": p.get("name", ""),
+      "access_token": p["access_token"],
+    }
+    for p in data["data"]
+  }
+  PAGE_TOKENS_FETCHED_AT = now
+  print(f"✅ Cached {len(PAGE_TOKENS)} page tokens.")
+
+
+# ==============================
+# 🌐 API ENDPOINTS
+# ==============================
+
+@app.route("/api/get-token")
 def get_token():
-    """Trả về token của page theo page_id hoặc page_name"""
-    global PAGE_TOKENS, TOKEN_EXPIRE
+  """
+  Trả về danh sách page token để FE chọn fanpage.
+  Format:
+  {
+    "123456789": {
+      "pageId": "123456789",
+      "name": "Page ABC",
+      "access_token": "EAAG..."
+    },
+    "999999999": { ... }
+  }
+  """
+  try:
+    fetch_page_tokens(force=False)
+    return jsonify(PAGE_TOKENS)
+  except Exception as e:
+    return jsonify({"error": str(e)}), 500
 
-    # Nếu token chưa có hoặc sắp hết hạn thì refresh
-    now = int(time.time())
-    if not PAGE_TOKENS or now > TOKEN_EXPIRE - 3600:
-        fetch_page_tokens()
 
-    page_id = request.args.get("page_id")
-    page_name = request.args.get("page_name")
+@app.route("/api/health")
+def health():
+  return jsonify({
+    "status": "ok",
+    "timestamp": int(time.time()),
+    "pages_cached": len(PAGE_TOKENS),
+  })
 
-    if page_id and page_id in PAGE_TOKENS:
-        return jsonify({
-            "page_id": page_id,
-            "page_name": PAGE_TOKENS[page_id]["name"],
-            "access_token": PAGE_TOKENS[page_id]["access_token"]
-        })
-    elif page_name:
-        for pid, pdata in PAGE_TOKENS.items():
-            if pdata["name"].lower() == page_name.lower():
-                return jsonify({
-                    "page_id": pid,
-                    "page_name": pdata["name"],
-                    "access_token": pdata["access_token"]
-                })
-        return jsonify({"error": "Không tìm thấy page với tên đó"}), 404
-    else:
-        return jsonify(PAGE_TOKENS)
 
-# =============================
-# 🆕 API: Cập nhật token thủ công
-# =============================
-@app.route("/update-token", methods=["POST"])
+@app.route("/api/update-token", methods=["POST"])
 def update_token():
-    """Cập nhật LONG_LIVED_USER_TOKEN mới"""
-    global LONG_LIVED_USER_TOKEN, PAGE_TOKENS, TOKEN_EXPIRE
+  """
+  Cho phép cập nhật System User Token mới (nếu bạn regenerate trong Business).
+  Body JSON:
+  {
+    "token": "EAAG....."
+  }
+  """
+  global PAGE_TOKENS, PAGE_TOKENS_FETCHED_AT
 
-    data = request.get_json(force=True)
-    new_token = data.get("token")
+  try:
+    print("📥 Nhận request /api/update-token")
+    data = request.get_json(force=True) or {}
+    token = data.get("token", "").strip()
 
-    if not new_token:
-        return jsonify({"error": "Thiếu token mới"}), 400
+    if not token:
+      return jsonify({"error": "Thiếu trường 'token' trong request body"}), 400
 
-    LONG_LIVED_USER_TOKEN = new_token
-    try:
-        fetch_page_tokens()
-        return jsonify({
-            "message": "✅ Token đã được cập nhật thành công!",
-            "expires_at": TOKEN_EXPIRE,
-            "pages": list(PAGE_TOKENS.values())
-        })
-    except Exception as e:
-        return jsonify({"error": f"❌ Token không hợp lệ: {e}"}), 400
+    # Lưu token mới vào file + RAM
+    save_system_user_token(token)
 
-# =============================
-# Run server
-# =============================
+    # Reset cache page
+    PAGE_TOKENS = {}
+    PAGE_TOKENS_FETCHED_AT = 0
+
+    # Fetch lại page token
+    fetch_page_tokens(force=True)
+
+    return jsonify({
+      "message": "✅ System User Token updated successfully",
+      "pages_cached": len(PAGE_TOKENS),
+    }), 200
+
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
+  # Chạy dev, production thì nên dùng gunicorn/uwsgi
+  app.run(host="0.0.0.0", port=8000, debug=True)
