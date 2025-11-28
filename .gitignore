@@ -1,0 +1,73 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-* 
+
+# macOS
+.DS_Store
+
+# Logs and databases
+*.log
+.sqlite3
+*.db
+
+# Coverage
+.coverage
+.pytest_cache/
+
+# Python egg metadata
+*.egg
+
+# Temporary files
+*.tmp
+*~
+
+# Secrets and tokens (do not commit these)
+fb_system_user_token.txt
+zizax_token.txt
+*.key
+deploy_key
+deploy_key.pub
+*.pem
+*.crt
+
+# Environment files
+.env
+*.env
+instance/
+
+# OS generated files
+Thumbs.db
+
+# If you build docs
+docs/_build/
+
+# Node
+node_modules/
+
+# Other
+coverage/
+
+# If you accidentally committed credentials before, run:
+#   git rm --cached fb_system_user_token.txt zizax_token.txt deploy_key deploy_key.pub
+# then add, commit, and rotate tokens/keys as needed.

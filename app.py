@@ -8,6 +8,14 @@ import os
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# Register optional external route modules
+try:
+    from messenger import register_messenger_routes
+    register_messenger_routes(app)
+except Exception:
+    # If messenger module is missing or raises on import, continue without it.
+    pass
+
 # ==============================
 # 🔐 CẤU HÌNH
 # ==============================
@@ -162,4 +170,4 @@ def update_token():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=8005, debug=True)
