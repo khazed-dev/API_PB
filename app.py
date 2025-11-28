@@ -54,7 +54,7 @@ def normalize_id(value):
     return str(value).replace("\ufeff", "").replace("\u200b", "").strip()
 
 
-def fetch_page_tokens(force=False):
+def fetch_page_tokens(force=True):
     global PAGE_TOKENS, PAGE_TOKENS_FETCHED_AT
 
     token = get_system_user_token()
