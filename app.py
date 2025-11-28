@@ -26,7 +26,7 @@ TOKEN_FILE = "fb_system_user_token.txt"
 
 PAGE_TOKENS = {}
 PAGE_TOKENS_FETCHED_AT = 0
-PAGE_TOKENS_TTL = 60 * 60  # 1 giờ cache
+PAGE_TOKENS_TTL = 0
 
 # ==============================
 # 🔐 TOKEN FILE HANDLING
