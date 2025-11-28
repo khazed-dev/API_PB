@@ -9,12 +9,12 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Register optional external route modules
-try:
-    from messenger import register_messenger_routes
-    register_messenger_routes(app)
-except Exception:
-    # If messenger module is missing or raises on import, continue without it.
-    pass
+# try:
+#     from messenger import register_messenger_routes
+#     register_messenger_routes(app)
+# except Exception:
+#     # If messenger module is missing or raises on import, continue without it.
+#     pass
 
 # ==============================
 # 🔐 CẤU HÌNH
