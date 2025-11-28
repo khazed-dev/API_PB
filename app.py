@@ -106,7 +106,81 @@ def get_token():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ==============================
+# 💬 API SEND MESSENGER MESSAGE
+# ============================== alias for compatibility
+@app.route("/api/send-messenger-message", methods=["POST"])
+def send_messenger_message():
+    """
+    Gửi tin nhắn Messenger từ Page cố định (pageId=107521941056856)
+    Dữ liệu POST:
+    {
+        "recipient_id": "...",
+        "message_text": "..."
+    }
+    """
 
+    try:
+        data = request.get_json(force=True) or {}
+
+        recipient_id = normalize_id(data.get("recipient_id", ""))
+        message_text = data.get("message_text", "")
+
+        if not recipient_id or not message_text:
+            return jsonify({"error": "Missing recipient_id or message_text"}), 400
+
+        # Page ID cố định bạn yêu cầu
+        target_page_id = "107521941056856"
+
+        # Đảm bảo PAGE_TOKENS đã load
+        # fetch_page_tokens(force=False)
+
+        print("🔎 PAGE_TOKENS keys:", list(PAGE_TOKENS.keys()))
+        print("🔎 Using page_id:", target_page_id)
+
+        # Kiểm tra page có tồn tại trong token cache
+        # if target_page_id not in PAGE_TOKENS:
+        #     return jsonify({
+        #         "error": f"PageId {target_page_id} không tồn tại trong PAGE_TOKENS",
+        #         "pages_available": list(PAGE_TOKENS.keys())
+        #     }), 400
+
+        page_access_token = 'EAAZAmeBmEFmIBPw4fLsBJKa0IVZC9wG3XENKBV4dCBMC2ZCu2jfJwEDAqIEppHYFdUwJ9tteuagBglEf6zEiX1SakTJNHE8E7Iu1uTRImHBZCfeUbMzwx62uU9bVZAJwGWAz5EJiZC5tHgkwNshBzFQh0virkCoJ2KJqkUl5WmrR709ZBa5h3VmK5UtdI95m6xmh7YXYpjHSsbZAyWdjjnEZD'
+
+        # Facebook Send API
+        facebook_api_url = "https://graph.facebook.com/v23.0/me/messages"
+
+        payload = {
+            "messaging_type": "RESPONSE",
+            "recipient": {"id": recipient_id},
+            "message": {"text": message_text},
+        }
+
+        headers = {
+            "Authorization": f"Bearer {page_access_token}",
+            "Content-Type": "application/json"
+        }
+
+        fb_res = requests.post(facebook_api_url, json=payload, headers=headers)
+        fb_data = fb_res.json()
+
+        if fb_res.status_code >= 400:
+            return jsonify({
+                "error": "Facebook API error",
+                "status_code": fb_res.status_code,
+                "details": fb_data
+            }), fb_res.status_code
+
+        return jsonify({
+            "status": "success",
+            "recipient_id": recipient_id,
+            "facebook": fb_data
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 @app.route("/api/health")
 def health():
     return jsonify({
