@@ -14,70 +14,55 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 APP_ID = "539235329188410"
 APP_SECRET = "87ac73c3ab4666955d2ca00b9900b051"
 
-# File lưu System User Token
 TOKEN_FILE = "fb_system_user_token.txt"
 
-# Cache page tokens trong RAM
 PAGE_TOKENS = {}
 PAGE_TOKENS_FETCHED_AT = 0
 PAGE_TOKENS_TTL = 60 * 60  # 1 giờ cache
 
 # ==============================
-# 🔐 TOKEN: ALWAYS READ FROM FILE
+# 🔐 TOKEN FILE HANDLING
 # ==============================
 def get_system_user_token():
-    """
-    Luôn đọc token mới nhất từ file.
-    Không dùng biến toàn cục SYSTEM_USER_TOKEN nữa.
-    """
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, "r", encoding="utf-8") as f:
-            token = f.read().strip()
-            return token
-
-    # fallback (ít khi dùng)
+            return f.read().strip()
     return os.getenv("FB_SYSTEM_USER_TOKEN", "").strip()
 
 
 def save_system_user_token(token: str):
-    """
-    Ghi System User Token vào file.
-    API sẽ tự động đọc token mới trong các request tiếp theo.
-    """
     with open(TOKEN_FILE, "w", encoding="utf-8") as f:
         f.write(token.strip())
     print("💾 Saved System User Token to file.")
 
 
 # ==============================
-# 🔄 LẤY PAGE TOKENS
+# 🔄 FETCH PAGE TOKENS
 # ==============================
-def fetch_page_tokens(force=False):
-    """
-    Lấy danh sách page (pageId + pageAccessToken) từ System User Token.
-    Cache 1 giờ.
-    Nếu force=True → gọi lại Facebook ngay.
-    """
+def normalize_id(value):
+    """Loại bỏ BOM, ký tự ẩn và ép về string"""
+    if value is None:
+        return ""
+    return str(value).replace("\ufeff", "").replace("\u200b", "").strip()
 
+
+def fetch_page_tokens(force=False):
     global PAGE_TOKENS, PAGE_TOKENS_FETCHED_AT
 
     token = get_system_user_token()
-
     if not token:
         raise Exception("System User Token chưa được cấu hình. Gọi /api/update-token")
 
     now = time.time()
 
-    # Dùng cache nếu còn hạn và không force
     if not force and PAGE_TOKENS and (now - PAGE_TOKENS_FETCHED_AT) < PAGE_TOKENS_TTL:
-        print("ℹ️ Using cached PAGE_TOKENS.")
+        print("ℹ️ Using cached PAGE_TOKENS")
         return
 
     print("📡 Fetching PAGE_TOKENS from Facebook...")
 
     url = "https://graph.facebook.com/v18.0/me/accounts"
-    params = {"access_token": token}
-    res = requests.get(url, params=params)
+    res = requests.get(url, params={"access_token": token})
     data = res.json()
 
     if "error" in data:
@@ -87,17 +72,19 @@ def fetch_page_tokens(force=False):
     if "data" not in data:
         raise Exception(f"Lỗi bất thường khi lấy page token: {data}")
 
-    PAGE_TOKENS = {
-        p["id"]: {
-            "pageId": p["id"],
+    PAGE_TOKENS = {}
+
+    for p in data["data"]:
+        pid = normalize_id(p["id"])
+        PAGE_TOKENS[pid] = {
+            "pageId": pid,
             "name": p.get("name", ""),
             "access_token": p["access_token"],
         }
-        for p in data["data"]
-    }
 
     PAGE_TOKENS_FETCHED_AT = now
     print(f"✅ Cached {len(PAGE_TOKENS)} page tokens.")
+    print("🔎 PAGE_TOKENS keys:", list(PAGE_TOKENS.keys()))
 
 
 # ==============================
@@ -123,31 +110,20 @@ def health():
 
 @app.route("/api/update-token", methods=["POST"])
 def update_token():
-    """
-    Cập nhật System User Token mới.
-    Body JSON:
-    {
-      "token": "EAAG....."
-    }
-    """
     global PAGE_TOKENS, PAGE_TOKENS_FETCHED_AT
 
     try:
-        print("📥 Nhận request /api/update-token")
         data = request.get_json(force=True) or {}
         token = data.get("token", "").strip()
 
         if not token:
-            return jsonify({"error": "Thiếu trường 'token' trong request body"}), 400
+            return jsonify({"error": "Thiếu trường 'token'"}), 400
 
-        # Lưu token mới vào file
         save_system_user_token(token)
 
-        # Reset cache
         PAGE_TOKENS = {}
         PAGE_TOKENS_FETCHED_AT = 0
 
-        # Fetch lại token mới
         fetch_page_tokens(force=True)
 
         return jsonify({
@@ -156,59 +132,57 @@ def update_token():
         }), 200
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+
+# ==============================
+# 🗑 API DELETE COMMENT
+# ==============================
 @app.route("/api/delete-comment", methods=["POST"])
 def delete_comment():
     """
-    Xoá comment Facebook bằng pageId + commentId
-    Body JSON:
     {
         "commentId": "123",
         "pageId": "881733028346164"
     }
     """
-
     try:
         data = request.get_json(force=True) or {}
-        comment_id = data.get("commentId", "").strip()
-        page_id = str(data.get("pageId", "")).strip()
-        if not page_id:
-            return jsonify({"error": "pageId missing"}), 400
 
+        comment_id = normalize_id(data.get("commentId", ""))
+        page_id = normalize_id(data.get("pageId", ""))
 
         if not comment_id or not page_id:
             return jsonify({"error": "Thiếu commentId hoặc pageId"}), 400
 
-        # 1️⃣ Đảm bảo page tokens đã được tải
+        # load tokens
         fetch_page_tokens(force=False)
+
+        # Debug log
+        print("===================================")
+        print("📝 DEBUG_KEYS:", list(PAGE_TOKENS.keys()))
+        print("📝 DEBUG_PAGE_ID:", repr(page_id))
+        print("===================================")
 
         if page_id not in PAGE_TOKENS:
             return jsonify({
-                "error": f"Không tìm thấy pageId {page_id} trong PAGE_TOKENS",
+                "error": f"Không tìm thấy pageId = {page_id} trong PAGE_TOKENS",
                 "pages_available": list(PAGE_TOKENS.keys())
             }), 400
 
         page_token = PAGE_TOKENS[page_id]["access_token"]
 
-        # 2️⃣ Gọi Facebook Graph API xoá comment
         fb_url = f"https://graph.facebook.com/{comment_id}"
-        params = {"access_token": page_token}
-
-        fb_res = requests.delete(fb_url, params=params)
+        fb_res = requests.delete(fb_url, params={"access_token": page_token})
         fb_data = fb_res.json()
 
-        # 3️⃣ Không crash nếu comment đã xoá
         if "error" in fb_data:
             return jsonify({
                 "status": "warning",
-                "message": "Comment có thể đã bị xoá trước đó hoặc không tồn tại",
+                "message": "Comment có thể đã bị xoá trước hoặc không tồn tại",
                 "facebook": fb_data
             }), 200
 
-        # 4️⃣ Thành công
         return jsonify({
             "status": "success",
             "deletedCommentId": comment_id,
@@ -216,9 +190,11 @@ def delete_comment():
         }), 200
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+
+# ==============================
+# 🚀 RUN SERVER
+# ==============================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
