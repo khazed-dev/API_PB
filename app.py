@@ -174,7 +174,10 @@ def delete_comment():
     try:
         data = request.get_json(force=True) or {}
         comment_id = data.get("commentId", "").strip()
-        page_id = data.get("pageId", "").strip()
+        page_id = str(data.get("pageId", "")).strip()
+        if not page_id:
+            return jsonify({"error": "pageId missing"}), 400
+
 
         if not comment_id or not page_id:
             return jsonify({"error": "Thiếu commentId hoặc pageId"}), 400
