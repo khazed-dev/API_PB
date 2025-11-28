@@ -160,6 +160,62 @@ def update_token():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/delete-comment", methods=["POST"])
+def delete_comment():
+    """
+    Xoá comment Facebook bằng pageId + commentId
+    Body JSON:
+    {
+        "commentId": "123",
+        "pageId": "881733028346164"
+    }
+    """
+
+    try:
+        data = request.get_json(force=True) or {}
+        comment_id = data.get("commentId", "").strip()
+        page_id = data.get("pageId", "").strip()
+
+        if not comment_id or not page_id:
+            return jsonify({"error": "Thiếu commentId hoặc pageId"}), 400
+
+        # 1️⃣ Đảm bảo page tokens đã được tải
+        fetch_page_tokens(force=False)
+
+        if page_id not in PAGE_TOKENS:
+            return jsonify({
+                "error": f"Không tìm thấy pageId {page_id} trong PAGE_TOKENS",
+                "pages_available": list(PAGE_TOKENS.keys())
+            }), 400
+
+        page_token = PAGE_TOKENS[page_id]["access_token"]
+
+        # 2️⃣ Gọi Facebook Graph API xoá comment
+        fb_url = f"https://graph.facebook.com/{comment_id}"
+        params = {"access_token": page_token}
+
+        fb_res = requests.delete(fb_url, params=params)
+        fb_data = fb_res.json()
+
+        # 3️⃣ Không crash nếu comment đã xoá
+        if "error" in fb_data:
+            return jsonify({
+                "status": "warning",
+                "message": "Comment có thể đã bị xoá trước đó hoặc không tồn tại",
+                "facebook": fb_data
+            }), 200
+
+        # 4️⃣ Thành công
+        return jsonify({
+            "status": "success",
+            "deletedCommentId": comment_id,
+            "facebook": fb_data
+        }), 200
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
